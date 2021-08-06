@@ -1,0 +1,18 @@
+PS D:\mytsinghua\nlp\KeyPhrase_Extraction>  d:; cd 'd:\mytsinghua\nlp\KeyPhrase_Extraction'; & 'C:\Users\Zz\Anaconda3\envs\keyphrase\python.exe' 'c:\Users\Zz\.vscode\extensions\ms-python.python-2021.8.1102490946\pythonFiles\lib\python\debugpy\launcher' '8670' '--' 'd:\mytsinghua\nlp\KeyPhrase_Extraction\sem.py' 
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 100/100 [00:00<00:00, 1188.88it/s]
+ 34%|████████████████████████████████████████████████████▎                                                                                                     | 34/100 [00:21<00:29,  2.23it/s]
+S0168583X14003929 : electronic or photonic device : electronic or photonic devices
+原文是devices，要求是识别出没有s
+ 89%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████                 | 89/100 [00:39<00:03,  3.23it/s]
+S1687850714000405 : maceration of vegetable matte : maceration of vegetable matter (
+可能是正确答案错了？少打个r
+ 90%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▌               | 90/100 [00:40<00:03,  2.72it/s]
+S1746809416300933 : electrically evoked auditory steady - state responses : ##electrically evoked auditory steady -
+这个是elelectrically和前面连上了
+S1746809416300933 : ci artifact : ##ci artifact
+S1746809416300933 : ci artifact : ##ci artifact
+这两个是ci和前面的连上了，可能是原文错误
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 100/100 [00:43<00:00,  2.28it/s]
+flict_pos_num 538
+not_same_kp 5
+same_kp 2052
