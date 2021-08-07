@@ -1,19 +1,29 @@
 import torch
-from torch.utils.data import Dataset
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import os
-from transformers import RobertaTokenizerFast,BertTokenizer
+from transformers import RobertaTokenizerFast,BertTokenizer,BertForMaskedLM,BertModel
+
+import matplotlib.pyplot as plt
+import numpy as np
+
 class semeval2017_dataset(Dataset):
     def __init__(self,tokenizer):
         self.datasetname = "semeval2017"
         self.tokenizer = tokenizer
-        self.dataset = []
+        self.dataset = {"input_ids":[],"attention_mask":[],"token_type_ids":[],"mlm_labels":[],"labels":[]}
         self.dataset_len = 0
         
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset["labels"])
+
     def __getitem__(self,index):
-        return self.dataset[index]
+        return {key: data[index] for key, data in self.dataset.items()}
+
+    def cuda(self): 
+        for key in self.dataset:
+            self.dataset[key] = self.dataset[key].cuda()
 
     def get_fileNames(self,root, suffix=None):
         if not os.path.isabs(root):
@@ -27,7 +37,8 @@ class semeval2017_dataset(Dataset):
         else:
             result = names
         return result
-    def load_data_from(self,datadir):
+
+    def load_data_from(self,datadir,template_path,max_length=512):
         self.filenames = self.get_fileNames(datadir,".txt")
         self.dataset_len = len(self.filenames)
         origin_data={}
@@ -38,6 +49,7 @@ class semeval2017_dataset(Dataset):
         not_same_kp = 0
         not_same_log = []
         same_kp = 0
+        self.dataset_without_prompt = []
         for filename in tqdm(self.filenames):
             origin_data['filename'].append(filename)
             with open(os.path.join(datadir,filename+".txt"), 'r',encoding='utf-8') as file_txt:
@@ -51,11 +63,11 @@ class semeval2017_dataset(Dataset):
                     keyphrase_single.append(line)
                 origin_data["keyphrase"].append(keyphrase_single)
         assert self.dataset_len == len(origin_data["text"]) == len( origin_data["keyphrase"]) , "lengths are not same."
-        for i in tqdm(range(self.dataset_len)):
+        for i in tqdm(range(10)):
             text = origin_data["text"][i]
             filename = origin_data["filename"][i]
             keyphrases = origin_data["keyphrase"][i]
-            text_token = tokenizer(text)
+            text_token = self.tokenizer(text)
             text_len = len(text_token["input_ids"])
             keyphrase_pos = []
             for keyphrase in keyphrases:
@@ -71,8 +83,8 @@ class semeval2017_dataset(Dataset):
                 kp_token_len = len(kp_token["input_ids"])
 
                 keyphrase_token = [text_token["input_ids"][keyphrase_idx] for keyphrase_idx in range(pretoken_len-1,pretoken_len+kp_token_len-3)]
-                keyphrase2 = tokenizer.decode(keyphrase_token)
-                keyphrase1 = tokenizer.decode(kp_token["input_ids"][1:-1])
+                keyphrase2 = self.tokenizer.decode(keyphrase_token)
+                keyphrase1 = self.tokenizer.decode(kp_token["input_ids"][1:-1])
                 if keyphrase_token != kp_token["input_ids"][1:-1]:
                     not_same_log.append(filename+':'+keyphrase1+':'+keyphrase2)
                     not_same_kp+=1
@@ -88,20 +100,176 @@ class semeval2017_dataset(Dataset):
                     else:
                         pos_label[pos]=1
             text_token['labels'] = pos_label
-            self.dataset.append(text_token)
+            self.dataset_without_prompt.append(text_token)
+        
         print("flict_pos_num",flict_pos_num)
         print("not_same_kp",not_same_kp)
         print("same_kp",same_kp)
         print("not_same_log",not_same_log)
+        self.template_padding(template_path,max_length=max_length)
 
+    def template_padding(self,template_path,max_length=512,template_id=0): 
+        with open(template_path,'r',encoding='utf-8') as f: 
+            templates = [line.strip().split() for line in f]
+            self.template = templates[template_id]
 
+        tmp =[]
+        for idx,x in enumerate(self.template):
+            if x == "<mask>":
+                tmp.append(self.tokenizer.mask_token_id)
+            elif x== "<text>":
+                pass
+            else:
+                tmp+=self.tokenizer(x)["input_ids"][1:-1]
+        tmp_len = len(tmp)+2
+        assert tmp_len<=max_length,"max_length too short"
 
+        for data in self.dataset_without_prompt:
+            composed = {"input_ids":[],"attention_mask":[],"token_type_ids":[],"labels":[]}
+            composed["input_ids"].append(data["input_ids"][0])
+            composed["attention_mask"].append(data["attention_mask"][0])
+            composed["token_type_ids"].append(data["token_type_ids"][0])
+            composed["labels"].append(0)
+            
+            for idx,x in enumerate(self.template):
+                if x == "<mask>":
+                    composed["input_ids"].append(self.tokenizer.mask_token_id)
+                    composed["attention_mask"].append(1)
+                    composed["token_type_ids"].append(composed["token_type_ids"][0])
+                    #TODO 这里可能用1会更好，因为这个mask和keyphrase相关度很高
+                    composed["labels"].append(1)
+                elif x == "<text>":
+                    len_ = len(data["attention_mask"][1:-1])
+                    if len_+tmp_len > max_length:
+                        len_ = max_length-tmp_len
+    
+                    composed["input_ids"]+=(data["input_ids"][1:-1])[0:len_]
+                    composed["attention_mask"]+=[1]*len_
+                    composed["token_type_ids"]+=[composed["token_type_ids"][0]]*len_
+                    composed["labels"]+=(data["labels"][1:-1])[0:len_]
+                else:
+                    token_x = self.tokenizer(x)["input_ids"][1:-1]
+                    token_x_len = len(token_x)
+                    composed["input_ids"]+= token_x
+                    composed["attention_mask"]+= [1]*token_x_len
+                    composed["token_type_ids"]+=[composed["token_type_ids"][0]]*token_x_len
+                    composed["labels"]+=[0]*token_x_len
+
+            composed["input_ids"].append(data["input_ids"][-1])
+            composed["attention_mask"].append(data["attention_mask"][-1])
+            composed["token_type_ids"].append(data["token_type_ids"][-1])
+            composed["labels"].append(0)
+            assert len(composed["input_ids"])==len(composed["attention_mask"])==len(composed["token_type_ids"])==len(composed["labels"]),"length does not match"
+            
+            padding_length = max_length - len(composed["attention_mask"])
+            if padding_length>0:
+                composed["input_ids"]+=[self.tokenizer.pad_token_id] * padding_length
+                composed["attention_mask"]+=[0]*padding_length
+                if data["token_type_ids"][-1]==0:
+                    a_m = 1
+                else: 
+                    a_m = 0 
+                composed["token_type_ids"]+=[a_m]*padding_length
+                composed["labels"] +=[0]*padding_length
+
+            composed["mlm_labels"] = self.get_mask_positions(composed["input_ids"])
+            assert len(composed["mlm_labels"])==len(composed["input_ids"])==len(composed["attention_mask"])==len(composed["token_type_ids"])==len(composed["labels"])==max_length,"length does not match"
+            
+            self.dataset["input_ids"].append(composed["input_ids"])
+            self.dataset["attention_mask"].append(composed["attention_mask"])
+            self.dataset["token_type_ids"].append(composed["token_type_ids"])
+            self.dataset["labels"].append(composed["labels"])
+            self.dataset["mlm_labels"].append(composed["mlm_labels"])
+        self.dataset["input_ids"] = torch.Tensor(self.dataset["input_ids"]).long()
+        self.dataset["attention_mask"] = torch.Tensor(self.dataset["attention_mask"]).long()
+        self.dataset["token_type_ids"] = torch.Tensor(self.dataset["token_type_ids"]).long()
+        self.dataset["labels"] = torch.Tensor(self.dataset["labels"]).long()
+        self.dataset["mlm_labels"] = torch.Tensor(self.dataset["mlm_labels"]).long()
+
+    def get_mask_positions(self, input_ids):
+        label_idx = input_ids.index(self.tokenizer.mask_token_id)
+        labels = [-1] * len(input_ids)
+        labels[label_idx] = 1
+        return labels
+
+class Model(torch.nn.Module):
+    def __init__(self, tokenizer = None):
+        super().__init__()
+        self.tokenizer = tokenizer
+        #TODO bertmodel ,BertForMaskedLM 有什么区别
+        self.model = BertModel.from_pretrained(
+            "bert-base-uncased",
+            return_dict = False)
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.model.config.hidden_size, self.model.config.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.model.config.hidden_size, 2))
+    def forward(self,input_ids,attention_mask, token_type_ids,labels,mlm_labels):
+        cur_batchsize = input_ids[0]
+        # inputs_embeds = self.model.roberta.embeddings.word_embeddings(input_ids)
+        logits = self.model(input_ids=input_ids,
+                          attention_mask=attention_mask,
+                          token_type_ids=token_type_ids)[0]
+        predict = self.mlp(logits)
+        return predict
+def get_criterion():
+    pass
+def train(model,dataloader,max_epochs=1):
+    epochs=0
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
+    loss_list = []
+    while (epochs < max_epochs):
+        tr_loss = 0.0
+        global_step = 0 
+        epochs +=1
+
+        with tqdm(total = len(dataloader)) as t:
+            for step, batch in enumerate(dataloader):
+                t.set_description("Epoch {}".format(epochs))
+                predict = model(**batch)
+                labels = batch['labels']
+                loss = criterion(predict.view(-1,2), labels.view(-1))
+                t.set_postfix(loss=loss.item())
+                t.update(1)
+
+                
+                # if args.gradient_accumulation_steps > 1:
+                #     loss = loss / args.gradient_accumulation_steps
+                optimizer.zero_grad()
+                loss.backward()
+                loss_list.append(loss.item())
+                # tr_loss += loss.item()
+                
+                # if (step + 1) % args.gradient_accumulation_steps == 0:
+                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
+                #     self.optimizer.step()
+                #     self.scheduler.step()
+                #     self.optimizer_new_token.step()
+                #     self.scheduler_new_token.step()
+                #     self.model.zero_grad()
+                #     global_step += 1
+
+    
+    plt.plot(loss_list)
+    plt.show()
+ 
 datadir_train = r"datasets\semeval2017\train\train2"
 datadir_train_abs = r"D:\mytsinghua\nlp\KeyPhrase_Extraction\datasets\semeval2017\test\semeval_articles_test"
 datadir_test = r"datasets\semeval2017\test\semeval_articles_test"
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased",add_prefix_space=True)
-
+template_path = r"datasets\semeval2017\templates.txt"
+save_model_path = r"model_params"
+tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 dataset = semeval2017_dataset(tokenizer)
+dataset.load_data_from(datadir_test,template_path)
+dataset.cuda()
+dataloader =  DataLoader(dataset,batch_size = 3,shuffle=True)
 
-dataset.load_data_from(datadir_test)
+# model_dict=model.load_state_dict(torch.load(save_model_path))
+model = Model(tokenizer=tokenizer)
+model.cuda()
+train(model,dataloader)
+# torch.save(model.state_dict(),save_model_path)
+
+
 print("end")

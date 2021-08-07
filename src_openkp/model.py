@@ -14,6 +14,7 @@ class Model(torch.nn.Module):
         self.model = RobertaModel.from_pretrain(
             "roberta-base",
             return_dict = False)
+        
     def forward(self,input_ids,attention_mask, token_type_ids, **karg):
         cur_batchsize = input_ids[0]
         inputs_embeds = self.model.roberta.embeddings.word_embeddings(input_ids)

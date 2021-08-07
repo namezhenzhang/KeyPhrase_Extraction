@@ -1,4 +1,5 @@
-from transformers import RobertaTokenizer, RobertaModel
-tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-model = RobertaModel.from_pretrained('roberta-base')
+from transformers import BertTokenizer, BertModel
+
+model = BertModel.from_pretrained("bert-base-uncased")
+
 help(model)
