@@ -1,3 +1,4 @@
+from logging import error
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -49,6 +50,7 @@ class semeval2017_dataset(Dataset):
         not_same_kp = 0
         not_same_log = []
         same_kp = 0
+        error_T = 0
         self.dataset_without_prompt = []
         for filename in tqdm(self.filenames):
             origin_data['filename'].append(filename)
@@ -63,7 +65,7 @@ class semeval2017_dataset(Dataset):
                     keyphrase_single.append(line)
                 origin_data["keyphrase"].append(keyphrase_single)
         assert self.dataset_len == len(origin_data["text"]) == len( origin_data["keyphrase"]) , "lengths are not same."
-        for i in tqdm(range(10)):
+        for i in tqdm(range(self.dataset_len)):
             text = origin_data["text"][i]
             filename = origin_data["filename"][i]
             keyphrases = origin_data["keyphrase"][i]
@@ -72,11 +74,16 @@ class semeval2017_dataset(Dataset):
             keyphrase_pos = []
             for keyphrase in keyphrases:
                 # 暂且只考虑T的关键词，且不考虑分类
-                if keyphrase[0][0] is not 'T': 
+                if keyphrase[0][0] != 'T': 
                     continue
                 tmp = keyphrase[1].split(" ")
                 keyphrase = keyphrase[2]
-                keyphrase_type,start,end = tmp[0], int(tmp[1]), int(tmp[2])
+                try:
+                    keyphrase_type,start,end = tmp[0], int(tmp[1]), int(tmp[2])
+                except:
+                    error_T += 1
+                    continue
+                
                 pretoken = self.tokenizer(text[0:start].strip())
                 pretoken_len = len(pretoken["input_ids"])
                 kp_token = self.tokenizer(text[start:end].strip())
@@ -106,6 +113,7 @@ class semeval2017_dataset(Dataset):
         print("not_same_kp",not_same_kp)
         print("same_kp",same_kp)
         print("not_same_log",not_same_log)
+        print("error_T",error_T)
         self.template_padding(template_path,max_length=max_length)
 
     def template_padding(self,template_path,max_length=512,template_id=0): 
@@ -212,12 +220,14 @@ class Model(torch.nn.Module):
                           token_type_ids=token_type_ids)[0]
         predict = self.mlp(logits)
         return predict
+
 def get_criterion():
     pass
+
 def train(model,dataloader,max_epochs=1):
     epochs=0
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.01)
     loss_list = []
     while (epochs < max_epochs):
         tr_loss = 0.0
@@ -229,11 +239,12 @@ def train(model,dataloader,max_epochs=1):
                 t.set_description("Epoch {}".format(epochs))
                 predict = model(**batch)
                 labels = batch['labels']
+                #TODO 这样写对吗
                 loss = criterion(predict.view(-1,2), labels.view(-1))
                 t.set_postfix(loss=loss.item())
                 t.update(1)
 
-                
+        
                 # if args.gradient_accumulation_steps > 1:
                 #     loss = loss / args.gradient_accumulation_steps
                 optimizer.zero_grad()
@@ -249,26 +260,25 @@ def train(model,dataloader,max_epochs=1):
                 #     self.scheduler_new_token.step()
                 #     self.model.zero_grad()
                 #     global_step += 1
-
-    
     plt.plot(loss_list)
+    plt.savefig("loss.png")
     plt.show()
  
-datadir_train = r"datasets\semeval2017\train\train2"
+datadir_train = r"datasets/semeval2017/train/train2"
 datadir_train_abs = r"D:\mytsinghua\nlp\KeyPhrase_Extraction\datasets\semeval2017\test\semeval_articles_test"
-datadir_test = r"datasets\semeval2017\test\semeval_articles_test"
-template_path = r"datasets\semeval2017\templates.txt"
+datadir_test = r"datasets/semeval2017/test/semeval_articles_test"
+template_path = r"datasets/semeval2017/templates.txt"
 save_model_path = r"model_params"
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 dataset = semeval2017_dataset(tokenizer)
-dataset.load_data_from(datadir_test,template_path)
+dataset.load_data_from(datadir_train,template_path)
 dataset.cuda()
-dataloader =  DataLoader(dataset,batch_size = 3,shuffle=True)
+dataloader =  DataLoader(dataset,batch_size = 2,shuffle=True)
 
 # model_dict=model.load_state_dict(torch.load(save_model_path))
 model = Model(tokenizer=tokenizer)
 model.cuda()
-train(model,dataloader)
+train(model,dataloader,max_epochs=10)
 # torch.save(model.state_dict(),save_model_path)
 
 
