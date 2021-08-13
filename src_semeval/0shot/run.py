@@ -300,16 +300,18 @@ def test(model, dataloader, keyphrases, template_id=0, prompt_length=0):
             f.write("keyphrases_preds: "+str(list(keyphrases_preds))+'\n')
             f.write("keyphrases_labels: "+str(list(keyphrases_labels))+'\n')
             for i, kp in enumerate(keyphrases_preds):
-                if kp in keyphrases_labels[i]:
-                    true += 1
-                all += 1
+                if len(keyphrases_labels[i]) != 0:
+                    if kp in keyphrases_labels[i]:
+                        true += 1
+                    all += 1
 
             # loss = criterion(predict.view(-1, 2), labels.view(-1))
             # t.set_postfix(loss=loss.item())
             t.update(1)
+    print(str(true)+'\n'+str(all)+'\n'+str(true/all)+'\n')
     f.write(str(true)+'\n'+str(all)+'\n'+str(true/all)+'\n')
     f.close()
-    return true/all
+    return true,all,true/all
 
 
 def train(model, dataloader, max_epochs=1):
@@ -364,8 +366,8 @@ tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 model = Model(tokenizer=tokenizer)
 model.cuda()
 file = open(f'src_semeval/0shot/accu.txt', 'w+', encoding="utf-8")
-for template_id in range(4):
-    for prompt_length in range(1, 6):
+for template_id in range(6):
+    for prompt_length in range(1, 5):
         model.prompt_length = prompt_length
         dataset = semeval2017_dataset(tokenizer)
         dataset.load_data_from(datadir_test, template_path,
@@ -373,10 +375,10 @@ for template_id in range(4):
         dataset.cuda()
         keyphrases = dataset.keyphrases
         dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
-        accu = test(model, dataloader, keyphrases,
+        true,all,accu = test(model, dataloader, keyphrases,
                     template_id=template_id, prompt_length=prompt_length)
         file.write("[template_id: "+str(template_id)+']'+"[prompt_length: " +
-                   str(prompt_length)+']'+'[accu: '+str(accu)+']'+'\n')
+                   str(prompt_length)+']'+f"[true: {true}][all: {all}][accu: {accu}]"+'\n')
 file.close()
 # model_dict=model.load_state_dict(torch.load(save_model_path))
 
