@@ -1,0 +1,6 @@
+[template_id: 0][prompt_length: 1][top: 5][true: 16][all: 74][accu: 0.21621621621621623]
+[template_id: 0][prompt_length: 2][top: 5][true: 28][all: 96][accu: 0.2916666666666667]
+[template_id: 0][prompt_length: 3][top: 5][true: 7][all: 93][accu: 0.07526881720430108]
+[template_id: 4][prompt_length: 1][top: 5][true: 18][all: 74][accu: 0.24324324324324326]
+[template_id: 4][prompt_length: 2][top: 5][true: 29][all: 96][accu: 0.3020833333333333]
+[template_id: 4][prompt_length: 3][top: 5][true: 6][all: 93][accu: 0.06451612903225806]

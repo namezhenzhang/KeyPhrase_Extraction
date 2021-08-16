@@ -283,53 +283,56 @@ class Model(torch.nn.Module):
 
 
 def test(model, dataloader, keyphrases, template_id=0, prompt_length=0, top=1):
-    true = 0
-    all = 0
-    f = open(
-        f'src_semeval/swp/template_{template_id}_prompt_{prompt_length}.txt', 'w', encoding="utf-8")
-    with tqdm(total=len(dataloader)) as t:
-        for step, batch in enumerate(dataloader):
-            # t.set_description("Epoch {}".format(epochs))
-            predict = model(**batch)
-            batch_size = len(batch['keyphrases_ids'])
-            input_ids = batch["input_ids"]
-            keyphrases_ids = batch['keyphrases_ids']
-            keyphrases_labels = [keyphrases[i] for i in keyphrases_ids]
-            attention_mask = batch["attention_mask"]
-            prompt_length = model.prompt_length
-            # 计算每个输出的top个最大概率滑动窗口作为输出
-            for i in range(batch_size):
+    model.eval()
+    with torch.no_grad():
+        true = 0
+        all = 0
+        f = open(
+            f'src_semeval/swp/template_{template_id}_prompt_{prompt_length}.txt', 'w', encoding="utf-8")
+        with tqdm(total=len(dataloader)) as t:
+            for step, batch in enumerate(dataloader):
+                # t.set_description("Epoch {}".format(epochs))
+                predict = model(**batch)
+                batch_size = len(batch['keyphrases_ids'])
+                input_ids = batch["input_ids"]
+                keyphrases_ids = batch['keyphrases_ids']
+                keyphrases_labels = [keyphrases[i] for i in keyphrases_ids]
+                attention_mask = batch["attention_mask"]
+                prompt_length = model.prompt_length
+                # 计算每个输出的top个最大概率滑动窗口作为输出
+                for i in range(batch_size):
 
-                # 滑动窗口长度
-                swp_len = attention_mask[i].sum()-2-(prompt_length-1)
-                swp_pred_prob = []
-                # 每个窗口概率
-                for j in range(1, swp_len+1):
-                    swp = input_ids[i][j:j+prompt_length]
-                    prod = 1
-                    for k, id in enumerate(swp):
-                        prod *= predict[i][k][int(id)]
-                    swp_pred_prob.append(prod)
-                # swp_pred_prob = torch.Tensor(swp_pred_prob)
-                assert len(swp_pred_prob) == swp_len, "length is wrong."
+                    # 滑动窗口长度
+                    swp_len = attention_mask[i].sum()-2-(prompt_length-1)
+                    swp_pred_prob = []
+                    # 每个窗口概率
+                    for j in range(1, swp_len+1):
+                        swp = input_ids[i][j:j+prompt_length]
+                        prod = 1
+                        for k, id in enumerate(swp):
+                            prod *= predict[i][k][int(id)]
+                        swp_pred_prob.append(prod)
+                    # swp_pred_prob = torch.Tensor(swp_pred_prob)
+                    assert len(swp_pred_prob) == swp_len, "length is wrong."
 
-                re1 = map(swp_pred_prob.index,
-                          heapq.nlargest(top, swp_pred_prob))
-                keyphrases_preds_ids = [
-                    [input_ids[i][k] for k in range(j+1, j+1+prompt_length)] for j in re1]
-                keyphrases_preds = [model.tokenizer.decode(
-                    j) for j in keyphrases_preds_ids]
+                    re1 = map(swp_pred_prob.index,
+                            heapq.nlargest(top, swp_pred_prob))
+                    keyphrases_preds_ids = [
+                        [input_ids[i][k] for k in range(j+1, j+1+prompt_length)] for j in re1]
+                    keyphrases_preds = [model.tokenizer.decode(
+                        j) for j in keyphrases_preds_ids]
 
-                f.write("keyphrases_preds: "+str(keyphrases_preds)+'\n')
-                f.write("keyphrases_labels: "+str(keyphrases_labels[i])+'\n')
-                is_true = 0
-                for j, kp in enumerate(keyphrases_preds):
+                    f.write("keyphrases_preds: "+str(keyphrases_preds)+'\n')
+                    f.write("keyphrases_labels: "+str(keyphrases_labels[i])+'\n')
+                    is_true = 0
+                    for j, kp in enumerate(keyphrases_preds):
+                        if len(keyphrases_labels[i]) != 0:
+                            if kp in keyphrases_labels[i]:
+                                is_true = 1
+                    true += is_true
                     if len(keyphrases_labels[i]) != 0:
-                        if kp in keyphrases_labels[i]:
-                            is_true = 1
-                true += is_true
-                all += 1
-            t.update(1)
+                        all += 1
+                t.update(1)
 
             # keyphrases_preds = [model.tokenizer.decode(i) for i in predict]
             # keyphrases_labels = [keyphrases[i] for i in keyphrases_ids]
@@ -395,21 +398,21 @@ template_path = r"datasets/semeval2017/templates.txt"
 save_model_path = r"model_params"
 # prompt_length = 2
 # template_id = 1
-top = 3
+top = 5
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
 model = Model(tokenizer=tokenizer)
 model.cuda()
-file = open(f'src_semeval/swp/accu.txt', 'w+', encoding="utf-8")
+file = open(f'src_semeval/swp/accu_traindata.txt', 'w+', encoding="utf-8")
 for template_id in [0, 4]:
     for prompt_length in range(1, 4):
         model.prompt_length = prompt_length
         dataset = semeval2017_dataset(tokenizer)
-        dataset.load_data_from(datadir_test, template_path,
+        dataset.load_data_from(datadir_train, template_path,
                                prompt_length=prompt_length, template_id=template_id)
         dataset.cuda()
         keyphrases = dataset.keyphrases
-        dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=5, shuffle=False)
         true, all, accu = test(model, dataloader, keyphrases,
                                template_id=template_id, prompt_length=prompt_length, top=top)
         file.write("[template_id: "+str(template_id)+']'+"[prompt_length: " +
